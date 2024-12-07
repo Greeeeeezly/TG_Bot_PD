@@ -4,27 +4,22 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-
-import org.telegram.telegrambots.bots.TelegramLongPollingBot;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.objects.Message;
-import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 public class MyTelegramBot extends TelegramLongPollingBot {
 
     private final String BOT_USERNAME = "MyMIITAdmissionBot";
     private final String BOT_TOKEN = "8034250486:AAE0IbxMfgOntzJq_uADS4cg_lgiPjO27cg";
-    private final Set<String> selectedSubjects = new HashSet<>(); // Хранит выбранные предметы
+
+    private final Map<String, Integer> selectedSubjects = new HashMap<>(); // Хранит предметы и их баллы
+    private boolean awaitingScore = false; // Флаг для ожидания ввода баллов
+    private String currentSubject = null; // Текущий выбранный предмет
+    private int sumScore = 0; // Общая сумма баллов
 
     @Override
     public String getBotUsername() {
@@ -44,67 +39,55 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             String userText = message.getText();
 
             if (userText.equals("/start")) {
-                selectedSubjects.clear(); // Очищаем выбранные предметы
+                resetSelection();
                 sendSubjectList(chatId);
-            } else if (selectedSubjects.size() < 4 && isSubject(userText)) {
-                // Если выбранный предмет, добавляем его в выбранные
-                selectedSubjects.add(userText);
-                sendMessage(chatId, "Выбран предмет: " + userText + ". Выберите еще или введите сумму баллов.");
-            } else if (userText.equals("/confirm")) {
-                // Подтверждение выбора и запрос суммы баллов
-                if (selectedSubjects.isEmpty()) {
-                    sendMessage(chatId, "Вы не выбрали ни одного предмета. Пожалуйста, выберите предметы.");
-                } else {
-                    sendMessage(chatId, "Введите сумму баллов:");
-                }
-            } else if (isInteger(userText)) {
-                // Если введено целое число, выводим результаты
+            } else if (!awaitingScore && isSubject(userText)) {
+                currentSubject = userText;
+                awaitingScore = true;
+                sendMessage(chatId, "Введите баллы за предмет \"" + userText + "\" (0–100):");
+            } else if (awaitingScore && isInteger(userText)) {
                 int score = Integer.parseInt(userText);
-                sendMessage(chatId, "Вы выбрали предметы: " + String.join(", ", selectedSubjects) + "\nСумма баллов: " + score);
-                selectedSubjects.clear(); // Очищаем после вывода
+                if (score >= 0 && score <= 100) {
+                    selectedSubjects.put(currentSubject, score);
+                    sumScore += score;
+                    awaitingScore = false;
+                    currentSubject = null;
+                    sendMessage(chatId, "Баллы сохранены. Вы можете выбрать следующий предмет или ввести /confirm для завершения.");
+                    sendSubjectList(chatId);
+                } else {
+                    sendMessage(chatId, "Введите корректные баллы (0–100):");
+                }
+            } else if (userText.equals("/confirm")) {
+                if (selectedSubjects.isEmpty()) {
+                    sendMessage(chatId, "Вы не выбрали ни одного предмета. Начните с команды /start.");
+                } else {
+                    sendMessage(chatId, "Ваш выбор:\n" + formatSelection() + "\nОбщая сумма баллов: " + sumScore + "\nСпасибо за использование бота!");
+                    resetSelection();
+                }
             } else {
-                sendMessage(chatId, "Пожалуйста, выберите предмет из списка или введите команду /confirm для подтверждения выбора.");
+                sendMessage(chatId, "Пожалуйста, выберите предмет из списка или введите баллы.");
             }
         }
     }
 
+    // Метод для отправки списка предметов
     private void sendSubjectList(String chatId) {
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
         keyboardMarkup.setResizeKeyboard(true);
 
-        List<KeyboardRow> keyboard = new ArrayList<>();
+        // Создание кнопок из SubjectEnum
+        List<KeyboardRow> keyboard = generateKeyboardFromEnum();
 
-        KeyboardRow row1 = new KeyboardRow();
-        row1.add(new KeyboardButton("Математика"));
-        row1.add(new KeyboardButton("Русский"));
-
-        KeyboardRow row2 = new KeyboardRow();
-        row2.add(new KeyboardButton("Информатика"));
-        row2.add(new KeyboardButton("Физика"));
-
-        KeyboardRow row3 = new KeyboardRow();
-        row3.add(new KeyboardButton("Английский"));
-        row3.add(new KeyboardButton("География"));
-
-        KeyboardRow row4 = new KeyboardRow();
-        row4.add(new KeyboardButton("Химия"));
-        row4.add(new KeyboardButton("Биология"));
-
-        KeyboardRow row5 = new KeyboardRow();
-        row5.add(new KeyboardButton("Литература"));
-        row5.add(new KeyboardButton("/confirm")); // Кнопка для подтверждения
-
-        keyboard.add(row1);
-        keyboard.add(row2);
-        keyboard.add(row3);
-        keyboard.add(row4);
-        keyboard.add(row5);
+        // Добавление кнопки подтверждения
+        KeyboardRow confirmRow = new KeyboardRow();
+        confirmRow.add(new KeyboardButton("/confirm"));
+        keyboard.add(confirmRow);
 
         keyboardMarkup.setKeyboard(keyboard);
 
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
-        message.setText("Выберите до 4 предметов:");
+        message.setText("Выберите предмет:");
         message.setReplyMarkup(keyboardMarkup);
 
         try {
@@ -114,12 +97,41 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    private boolean isSubject(String text) {
-        return text.equals("Математика") || text.equals("Русский") || text.equals("Информатика") ||
-                text.equals("Физика") || text.equals("Английский") || text.equals("География") ||
-                text.equals("Химия") || text.equals("Биология") || text.equals("Литература");
+    // Генерация кнопок на основе SubjectEnum
+    private List<KeyboardRow> generateKeyboardFromEnum() {
+        List<KeyboardRow> keyboard = new ArrayList<>();
+        KeyboardRow currentRow = new KeyboardRow();
+
+        // Итерация по перечислениям SubjectEnum
+        for (SubjectEnum subject : SubjectEnum.values()) {
+            currentRow.add(new KeyboardButton(subject.getDescription()));
+
+            // Если в строке уже 2 кнопки, добавляем строку в клавиатуру
+            if (currentRow.size() == 2) {
+                keyboard.add(currentRow);
+                currentRow = new KeyboardRow();
+            }
+        }
+
+        // Добавляем оставшиеся кнопки в строке
+        if (!currentRow.isEmpty()) {
+            keyboard.add(currentRow);
+        }
+
+        return keyboard;
     }
 
+    // Проверка, является ли текст предметом из SubjectEnum
+    private boolean isSubject(String text) {
+        for (SubjectEnum subject : SubjectEnum.values()) {
+            if (subject.getDescription().equals(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Проверка, является ли текст числом
     private boolean isInteger(String text) {
         try {
             Integer.parseInt(text);
@@ -129,6 +141,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    // Отправка сообщения
     private void sendMessage(String chatId, String text) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
@@ -140,4 +153,20 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    // Сброс текущего выбора
+    private void resetSelection() {
+        selectedSubjects.clear();
+        awaitingScore = false;
+        currentSubject = null;
+        sumScore = 0;
+    }
+
+    // Форматирование выбранных предметов
+    private String formatSelection() {
+        StringBuilder result = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : selectedSubjects.entrySet()) {
+            result.append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+        }
+        return result.toString();
+    }
 }
